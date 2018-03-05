@@ -28,10 +28,22 @@ import whisk.core.WhiskConfig
 import whisk.core.entity.Subject
 import whisk.core.loadBalancer.LoadBalancer
 
-private object LocalEntitlementProvider {
+private object LocalEntitlementProvider extends EntitlementSpiProvider {
 
   /** Poor mans entitlement matrix. Must persist to datastore eventually. */
   private val matrix = TrieMap[(Subject, String), Set[Privilege]]()
+  override def entitlementProvider(config: WhiskConfig, loadBalancer: LoadBalancer)(implicit actorSystem: ActorSystem,
+                                                                                    logging: Logging) =
+    new LocalEntitlementProvider(config: WhiskConfig, loadBalancer: LoadBalancer)
+}
+
+private object MHEntitlementProvider extends EntitlementSpiProvider {
+
+  /** Poor mans entitlement matrix. Must persist to datastore eventually. */
+  private val matrix = TrieMap[(Subject, String), Set[Privilege]]()
+  override def entitlementProvider(config: WhiskConfig, loadBalancer: LoadBalancer)(implicit actorSystem: ActorSystem,
+                                                                                    logging: Logging) =
+    new MHEntitlementProvider(config: WhiskConfig, loadBalancer: LoadBalancer)
 }
 
 protected[core] class LocalEntitlementProvider(private val config: WhiskConfig, private val loadBalancer: LoadBalancer)(
@@ -42,6 +54,48 @@ protected[core] class LocalEntitlementProvider(private val config: WhiskConfig, 
   private implicit val executionContext = actorSystem.dispatcher
 
   private val matrix = LocalEntitlementProvider.matrix
+
+  /** Grants subject right to resource by adding them to the entitlement matrix. */
+  protected[core] override def grant(subject: Subject, right: Privilege, resource: Resource)(
+    implicit transid: TransactionId) = Future {
+    synchronized {
+      val key = (subject, resource.id)
+      matrix.put(key, matrix.get(key) map { _ + right } getOrElse Set(right))
+      logging.debug(this, s"granted user '$subject' privilege '$right' for '$resource'")
+      true
+    }
+  }
+
+  /** Revokes subject right to resource by removing them from the entitlement matrix. */
+  protected[core] override def revoke(subject: Subject, right: Privilege, resource: Resource)(
+    implicit transid: TransactionId) = Future {
+    synchronized {
+      val key = (subject, resource.id)
+      val newrights = matrix.get(key) map { _ - right } map { matrix.put(key, _) }
+      logging.debug(this, s"revoked user '$subject' privilege '$right' for '$resource'")
+      true
+    }
+  }
+
+  /** Checks if subject has explicit grant for a resource. */
+  protected override def entitled(subject: Subject, right: Privilege, resource: Resource)(
+    implicit transid: TransactionId) = Future.successful {
+    lazy val one = matrix.get((subject, resource.id)) map { _ contains right } getOrElse false
+    lazy val any = matrix.get((subject, resource.parent)) map { _ contains right } getOrElse false
+    one || any
+  }
+}
+
+protected[core] class MHEntitlementProvider(private val config: WhiskConfig, private val loadBalancer: LoadBalancer)(
+  implicit actorSystem: ActorSystem,
+  logging: Logging)
+    extends EntitlementProvider(config, loadBalancer) {
+
+  private implicit val executionContext = actorSystem.dispatcher
+
+  private val matrix = MHEntitlementProvider.matrix
+
+  logging.info(this, "*****************MH********MHEntitlementProvider")
 
   /** Grants subject right to resource by adding them to the entitlement matrix. */
   protected[core] override def grant(subject: Subject, right: Privilege, resource: Resource)(
