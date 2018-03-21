@@ -23,7 +23,6 @@ import akka.http.scaladsl.model.headers._
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.util.Try
-
 import whisk.common.Logging
 import whisk.common.TransactionId
 import whisk.core.database.NoDocumentException
@@ -34,6 +33,7 @@ import whisk.core.entity.AuthKey
 import whisk.core.entity.Identity
 import whisk.core.entity.Secret
 import whisk.core.entity.UUID
+import pdi.jwt.{Jwt, JwtOptions}
 
 object Authenticate {
 
@@ -55,6 +55,7 @@ trait Authenticate {
    */
   def validateCredentials(credentials: Option[BasicHttpCredentials])(
     implicit transid: TransactionId): Future[Option[Identity]] = {
+    logging.info(this, s"***********basicAuth: $credentials ")
     credentials flatMap { pw =>
       Try {
         // authkey deserialization is wrapped in a try to guard against malformed values
@@ -81,4 +82,43 @@ trait Authenticate {
       Future.successful(None)
     }
   }
+
+  /**
+   * Validates credentials against the authentication database; may be used in
+   * authentication directive.
+   */
+  def validateBearerToken(credentials: Option[OAuth2BearerToken])(
+    implicit transid: TransactionId): Future[Option[Identity]] = {
+    logging.info(this, s"***********validateBearerToken: $credentials ")
+    credentials flatMap { cred =>
+      Try {
+
+        val token = Jwt.decode(cred.token, JwtOptions(signature = false));
+        logging.info(this, s"**********Token: $token ")
+
+        // authkey deserialization is wrapped in a try to guard against malformed values
+        val authkey = AuthKey(UUID("123"), Secret("foo"))
+        logging.info(this, s"authenticate: ${authkey.uuid}")
+        val future = Identity.get(authStore, authkey) map { result =>
+          if (authkey == result.authkey) {
+            logging.debug(this, s"authentication valid")
+            Some(result)
+          } else {
+            logging.debug(this, s"authentication not valid")
+            None
+          }
+        } recover {
+          case _: NoDocumentException | _: IllegalArgumentException =>
+            logging.debug(this, s"authentication not valid")
+            None
+        }
+        future onFailure { case t => logging.error(this, s"authentication error: $t") }
+        future
+      }.toOption
+    } getOrElse {
+      credentials.foreach(_ => logging.debug(this, s"credentials are malformed"))
+      Future.successful(None)
+    }
+  }
+
 }

@@ -201,6 +201,15 @@ class RestAPIVersion(config: WhiskConfig, apiPath: String, apiVersion: String)(
                 activations.routes(user) ~
                 packages.routes(user)
             }
+        } ~ bearerTokenAuth(validateBearerToken) { user =>
+          namespaces.routes(user) ~
+            pathPrefix(Collection.NAMESPACES) {
+              actions.routes(user) ~
+                triggers.routes(user) ~
+                rules.routes(user) ~
+                activations.routes(user) ~
+                packages.routes(user)
+            }
         } ~ {
           swaggerRoutes
         }

@@ -46,6 +46,16 @@ trait AuthenticatedRoute {
     }
   }
 
+  /** Creates HTTP BasicAuth handler */
+  def bearerTokenAuth[A](verify: Option[OAuth2BearerToken] => Future[Option[A]]) = {
+    authenticateOrRejectWithChallenge[OAuth2BearerToken, A] { creds =>
+      verify(creds).map {
+        case Some(t) => AuthenticationResult.success(t)
+        case None    => AuthenticationResult.failWithChallenge(HttpChallenges.basic("OpenWhisk secure realm"))
+      }
+    }
+  }
+
   /** Validates credentials against database of subjects */
   protected def validateCredentials(credentials: Option[BasicHttpCredentials])(
     implicit transid: TransactionId): Future[Option[Identity]]
