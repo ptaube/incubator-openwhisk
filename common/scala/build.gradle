@@ -46,6 +46,11 @@ dependencies {
     compile 'io.kamon:kamon-statsd_2.11:0.6.7'
 
     compile 'com.pauldijou:jwt-core_2.11:0.16.0'
+
+// https://mvnrepository.com/artifact/com.nimbusds/nimbus-jose-jwt
+    compile group: 'com.nimbusds', name: 'nimbus-jose-jwt', version: '5.7'
+
+
 }
 
 tasks.withType(ScalaCompile) {
